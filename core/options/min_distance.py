@@ -29,13 +29,13 @@ def min_dist_worker(idx, cif_path, file_count, file_names_and_min_dists):
     try:
         min_dist = cif.shortest_distance
         file_names_and_min_dists.append([file_name, min_dist])
-        elasped_time = time.perf_counter() - start_time
-
-        # prompt.print_finished_progress(file_name, atom_count, elasped_time)
-        print(f"Processed {file_name} with {atom_count} atoms in {elasped_time:.2f} s")
     except:
         print(f"Error while processing {file_name}")
         print(traceback.format_exc())
+    
+    elasped_time = time.perf_counter() - start_time
+    # prompt.print_finished_progress(file_name, atom_count, elasped_time)
+    print(f"Processed {file_name} with {atom_count} atoms in {elasped_time:.2f}s")
         
 def mp_aux(*args):
     for arg in args:
@@ -59,7 +59,7 @@ def filter_files_by_min_dist(cif_dir_path, is_interactive_mode=True):
         tasks.append({'idx': idx,
             'cif_path': f"{cif_dir_path}{os.sep}{cif.file_name}", 
             'file_count': ensemble.file_count, 'file_names_and_min_dists': file_names_and_min_dists})
-    print(f"Num tasks: {len(tasks)}")
+
     with mp.Pool(mp.cpu_count() - 2) as pool:
         pool.map(mp_aux, tasks)
         

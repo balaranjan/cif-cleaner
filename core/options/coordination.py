@@ -4,6 +4,10 @@ import time
 from core.utils import intro, prompt, object
 from cifkit import CifEnsemble
 from cifkit.utils import folder
+import traceback
+import multiprocessing as mp
+from cifkit import Cif
+import os
 
 
 def move_files_based_on_coordination_number(
@@ -40,6 +44,31 @@ def move_files_based_on_coordination_number(
     filter_and_move_files(ensemble, filter_choice, cif_dir_path, numbers)
 
 
+def CN_Num_worker(idx, cif_path, file_count, file_names_and_CNs):
+    
+    start_time = time.perf_counter()
+    cif = Cif(cif_path, is_formatted=True)
+    file_name = cif.file_name
+    atom_count = cif.supercell_atom_count
+    
+    print(f"Processing {file_name} with {atom_count} ({idx}/{file_count})")
+    try:
+        # Compute CN values for each .cif
+        CN_values = cif.CN_unique_values_by_min_dist_method
+        file_names_and_CNs.append([file_name, CN_values])
+    except:
+        print(f"Error while processing {file_name}")
+        print(traceback.format_exc())
+    
+    elasped_time = time.perf_counter() - start_time
+    print(f"Processed {file_name} with {atom_count} atoms in {elasped_time:.2f}s")
+
+
+def mp_aux(*args):
+    for arg in args:
+        CN_Num_worker(**arg)
+        
+        
 def filter_and_move_files(
     ensemble: CifEnsemble,
     filter_choice: int,
@@ -52,18 +81,30 @@ def filter_and_move_files(
     overall_start_time = time.perf_counter()
     folder_name = os.path.basename(cif_dir_path)
     filtered_file_paths = set()
-
+    
+    # parallel
+    mp_manager = mp.Manager() 
+    file_names_and_CNs = mp_manager.list()
+    tasks = []
+    
     for i, cif in enumerate(ensemble.cifs, start=1):
         file_name = cif.file_name
-        atom_count = cif.supercell_atom_count
         file_count = ensemble.file_count
+        
+        tasks.append({'idx': i,
+            'cif_path': f"{cif_dir_path}{os.sep}{cif.file_name}", 
+            'file_count': ensemble.file_count, 'file_names_and_CNs': file_names_and_CNs})
+    
+    print(f"Num tasks: {len(tasks)}")
+    with mp.Pool(mp.cpu_count() - 2) as pool:
+        pool.map(mp_aux, tasks)
+        
+    pool.close()
+    pool.join()
 
-        # Track time
-        file_start_time = time.perf_counter()
-        prompt.print_progress_current(i, file_name, atom_count, file_count)
-
-        # Compute CN values for each .cif
-        CN_values = cif.CN_unique_values_by_min_dist_method
+    file_names_and_CNs = list(file_names_and_CNs)
+    
+    for file_name, CN_values in file_names_and_CNs:
 
         if filter_choice == 1:
             destination_path = os.path.join(
@@ -71,7 +112,7 @@ def filter_and_move_files(
             )
             # Check if the CN values are exactly the same
             if set(numbers) == CN_values:
-                filtered_file_paths.add(cif.file_path)
+                filtered_file_paths.add(f"{cif_dir_path}{os.sep}{file_name}")
 
         elif filter_choice == 2:
             destination_path = os.path.join(
@@ -79,10 +120,7 @@ def filter_and_move_files(
             )
             # Check if at least one of the CN values is present
             if any(num in CN_values for num in numbers):
-                filtered_file_paths.add(cif.file_path)
-
-        elapsed_time = time.perf_counter() - file_start_time
-        prompt.print_finished_progress(file_name, atom_count, elapsed_time)
+                filtered_file_paths.add(f"{cif_dir_path}{os.sep}{file_name}")
 
     move_files_and_prompt(
         filtered_file_paths, destination_path, file_count, overall_start_time
