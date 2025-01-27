@@ -51,6 +51,21 @@ def filter_files_by_min_dist(cif_dir_path, is_interactive_mode=True):
     ensemble = object.init_cif_ensemble(cif_dir_path)
     
     # parallel
+    num_cpu = 1
+    if is_interactive_mode:
+        # mp
+        click.echo("\nSelect the number of core(s) for parallel/serial processing.")
+        click.echo("[1] Serial process (uses one CPU core).")
+        click.echo(f"[2] Parallel process with maximum ({mp.cpu_count()-2}) CPU cores (for 1000s of cifs).")
+        click.echo(f"[3] Enter the number of CPU cores (<={mp.cpu_count()-2}) manually for parallel processing.")
+        filter_choice = click.prompt("Enter your choice (1, 2, or 3)", type=int)
+    
+        if filter_choice == 2:
+            num_cpu = mp.cpu_count()-2
+        elif filter_choice == 3:
+            num_cpu = click.prompt(f"Enter the number of CPU cores ({mp.cpu_count()-2})", type=int)
+            num_cpu = min(num_cpu, mp.cpu_count()-2)
+
     mp_manager = mp.Manager() 
     file_names_and_min_dists = mp_manager.list()
     
@@ -60,7 +75,7 @@ def filter_files_by_min_dist(cif_dir_path, is_interactive_mode=True):
             'cif_path': f"{cif_dir_path}{os.sep}{cif.file_name}", 
             'file_count': ensemble.file_count, 'file_names_and_min_dists': file_names_and_min_dists})
 
-    with mp.Pool(mp.cpu_count() - 2) as pool:
+    with mp.Pool(num_cpu) as pool:
         pool.map(mp_aux, tasks)
         
     pool.close()
@@ -68,12 +83,18 @@ def filter_files_by_min_dist(cif_dir_path, is_interactive_mode=True):
     
     file_names_and_min_dists = list(file_names_and_min_dists)
     min_dists = [m[1] for m in file_names_and_min_dists]
+    
+    # Find files encountered error
+    processed_file_names = [f[0] for f in file_names_and_min_dists]
+    files_encountered_errors = [f"{cif_dir_path}{os.sep}{f.file_name}" for f in ensemble.cifs if f.file_name not in processed_file_names]
+    if files_encountered_errors:
+        ensemble.move_cif_files(files_encountered_errors, join(ensemble.dir_path, f"cifs_encountered_error"))
 
     # Folder to save the histogram
     plot_distance_histogram(cif_dir_path, min_dists, ensemble.file_count)
 
-    if is_interactive_mode:
-        click.echo("Note: .cif with minimum distance below threashold are relocated.")
+    if is_interactive_mode:    
+        click.echo("Note: .cif with minimum distance out of the bounds will be relocated.")
         prompt_dist_threshold_min = "\nEnter the threashold low minimum distance (unit in Å)"
         dist_threshold_min = click.prompt(prompt_dist_threshold_min, type=float)
         

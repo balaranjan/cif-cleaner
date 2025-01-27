@@ -18,6 +18,21 @@ def move_files_based_on_coordination_number(
 ) -> None:
     intro.prompt_coordination_number_intro()
     ensemble = object.init_cif_ensemble(cif_dir_path)
+    
+    num_cpu = 1
+    if is_interactive_mode:
+        # mp
+        click.echo("\nSelect the number of core(s) for parallel/serial processing.")
+        click.echo("[1] Serial process (uses one CPU core).")
+        click.echo(f"[2] Parallel process with maximum ({mp.cpu_count()-2}) CPU cores (for 1000s of cifs).")
+        click.echo(f"[3] Enter the number of CPU cores (<={mp.cpu_count()-2}) manually for parallel processing.")
+        filter_choice = click.prompt("Enter your choice (1, 2, or 3)", type=int)
+    
+        if filter_choice == 2:
+            num_cpu = mp.cpu_count()-2
+        elif filter_choice == 3:
+            num_cpu = click.prompt(f"Enter the number of CPU cores ({mp.cpu_count()-2})", type=int)
+            num_cpu = min(num_cpu, mp.cpu_count()-2)
 
     if is_interactive_mode:
         # Prompt for elements
@@ -41,7 +56,7 @@ def move_files_based_on_coordination_number(
     else:
         filter_choice = option
 
-    filter_and_move_files(ensemble, filter_choice, cif_dir_path, numbers)
+    filter_and_move_files(ensemble, filter_choice, cif_dir_path, numbers, num_cpu)
 
 
 def CN_Num_worker(idx, cif_path, file_count, file_names_and_CNs):
@@ -74,6 +89,7 @@ def filter_and_move_files(
     filter_choice: int,
     cif_dir_path: str,
     numbers: list[int],
+    num_cpu: int
 ) -> None:
     # Folder info
 
@@ -96,7 +112,7 @@ def filter_and_move_files(
             'file_count': ensemble.file_count, 'file_names_and_CNs': file_names_and_CNs})
     
     print(f"Num tasks: {len(tasks)}")
-    with mp.Pool(mp.cpu_count() - 2) as pool:
+    with mp.Pool(num_cpu) as pool:
         pool.map(mp_aux, tasks)
         
     pool.close()
@@ -123,8 +139,22 @@ def filter_and_move_files(
                 filtered_file_paths.add(f"{cif_dir_path}{os.sep}{file_name}")
 
     move_files_and_prompt(
-        filtered_file_paths, destination_path, file_count, overall_start_time
+        filtered_file_paths, destination_path, file_count, overall_start_time,
+        "filter by coordination numbers"
     )
+    
+    # Find files encountered error
+    processed_file_names = [f[0] for f in file_names_and_CNs]
+    files_encountered_errors = [f"{folder_name}{os.sep}{f.file_name}" for f in ensemble.cifs if f.file_name not in processed_file_names]
+    if files_encountered_errors:
+        move_files_and_prompt(
+            filtered_file_paths=files_encountered_errors, 
+            destination_path=os.path.join(cif_dir_path, f"{folder_name}_cifs_encountered_error"),
+            file_count=len(files_encountered_errors),
+            overall_start_time=overall_start_time,
+            message="files encountered errors"
+        )
+    
 
 
 def move_files_and_prompt(
@@ -132,6 +162,7 @@ def move_files_and_prompt(
     destination_path: str,
     file_count: int,
     overall_start_time: float,
+    message: str
 ) -> None:
     if filtered_file_paths:
         # Create folder and move files
@@ -140,4 +171,4 @@ def move_files_and_prompt(
     overall_elapsed_time = time.perf_counter() - overall_start_time
     prompt.print_total_time(overall_elapsed_time, file_count)
     prompt.print_moved_files_summary(filtered_file_paths, file_count, destination_path)
-    prompt.print_done_with_option("filter by coordination numbers")
+    prompt.print_done_with_option(message)
